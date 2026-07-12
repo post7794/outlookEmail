@@ -272,6 +272,104 @@ class GraphOauthRouteTests(unittest.TestCase):
             events.append(json.loads(block[len('data: '):]))
         return body, events
 
+    def _external_headers(self):
+        with self.app.app_context():
+            self.assertTrue(web_outlook_app.set_setting('external_api_key', 'external-test-key'))
+        return {'X-API-Key': 'external-test-key'}
+
+    def test_external_import_authorize_requires_api_key(self):
+        response = self.client.post(
+            '/api/external/outlook/import-authorize',
+            json={'email': 'external@example.com', 'password': 'mail-secret'},
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(response.get_json()['success'])
+
+    def test_external_import_authorize_uses_default_client_and_hides_secrets(self):
+        with patch.object(web_outlook_app, 'extract_graph_refresh_token', return_value={
+            'success': True,
+            'refresh_token': 'fresh-refresh-secret',
+            'client_id': web_outlook_app.OAUTH_CLIENT_ID,
+        }) as extract_mock, \
+             patch.object(web_outlook_app, 'test_refresh_token', return_value=(
+                 True, None, 'rotated-refresh-secret'
+             )), \
+             patch.object(web_outlook_app, 'probe_imap_mailbox_access', return_value={
+                 'success': True,
+             }) as imap_mock:
+            response = self.client.post(
+                '/api/external/outlook/import-authorize',
+                headers=self._external_headers(),
+                json={
+                    'email': 'external@example.com',
+                    'password': 'mail-secret',
+                    'remark': 'live import',
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload['success'])
+        self.assertEqual(payload['client_id'], web_outlook_app.OAUTH_CLIENT_ID)
+        self.assertEqual(payload['upload_status'], 'added')
+        response_text = response.get_data(as_text=True)
+        self.assertNotIn('mail-secret', response_text)
+        self.assertNotIn('fresh-refresh-secret', response_text)
+        self.assertNotIn('rotated-refresh-secret', response_text)
+
+        extract_mock.assert_called_once()
+        self.assertEqual(extract_mock.call_args.args[:2], (
+            'external@example.com', 'mail-secret'
+        ))
+        self.assertNotIn('client_id', extract_mock.call_args.kwargs)
+        imap_mock.assert_called_once_with(
+            'external@example.com',
+            web_outlook_app.OAUTH_CLIENT_ID,
+            'rotated-refresh-secret',
+        )
+
+        with self.app.app_context():
+            formal = web_outlook_app.get_account_by_email('external@example.com')
+            upload = web_outlook_app.get_db().execute(
+                'SELECT is_authorized, source FROM outlook_upload_accounts WHERE email = ?',
+                ('external@example.com',),
+            ).fetchone()
+        self.assertEqual(formal['refresh_token'], 'rotated-refresh-secret')
+        self.assertEqual(formal['client_id'], web_outlook_app.OAUTH_CLIENT_ID)
+        self.assertEqual(upload['is_authorized'], 1)
+        self.assertEqual(upload['source'], 'auto_auth')
+
+    def test_external_import_authorize_failure_keeps_upload_without_leaking_details(self):
+        with patch.object(web_outlook_app, 'extract_graph_refresh_token', return_value={
+            'success': False,
+            'error': 'OAuth 登录失败',
+            'details': 'password=mail-secret refresh_token=token-secret',
+        }):
+            response = self.client.post(
+                '/api/external/outlook/import-authorize',
+                headers=self._external_headers(),
+                json={'email': 'failed@example.com', 'password': 'mail-secret'},
+            )
+
+        self.assertEqual(response.status_code, 422)
+        payload = response.get_json()
+        self.assertFalse(payload['success'])
+        self.assertEqual(payload['email'], 'failed@example.com')
+        response_text = response.get_data(as_text=True)
+        self.assertNotIn('mail-secret', response_text)
+        self.assertNotIn('token-secret', response_text)
+        self.assertNotIn('details', payload)
+
+        with self.app.app_context():
+            upload = web_outlook_app.get_db().execute(
+                'SELECT password, is_authorized FROM outlook_upload_accounts WHERE email = ?',
+                ('failed@example.com',),
+            ).fetchone()
+        self.assertIsNotNone(upload)
+        self.assertNotEqual(upload['password'], 'mail-secret')
+        self.assertEqual(upload['is_authorized'], 0)
+
     def test_post_requires_existing_upload_account_id(self):
         response = self.client.post('/api/oauth/graph-extract-token', json={})
         self.assertEqual(response.status_code, 400)

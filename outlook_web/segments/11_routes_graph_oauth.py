@@ -598,6 +598,75 @@ def run_graph_oauth_task(account_id: int, output_queue: "queue.Queue[Dict[str, A
             output_queue.put(GRAPH_OAUTH_DONE)
 
 
+def run_graph_oauth_task_sync(account_id: int, mode: str = "imap") -> Dict[str, Any]:
+    """同步执行既有 OAuth 任务，并只返回不含凭据的最终摘要。"""
+    output_queue: "queue.Queue[Dict[str, Any] | object]" = queue.Queue()
+    run_graph_oauth_task(account_id, output_queue, normalize_graph_oauth_mode(mode))
+
+    success_event: Optional[Dict[str, Any]] = None
+    error_message = "OAuth 授权失败"
+    while True:
+        payload = output_queue.get()
+        if payload is GRAPH_OAUTH_DONE:
+            break
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("type") == "success" and payload.get("success"):
+            success_event = payload
+        elif payload.get("type") == "error":
+            error_message = graph_oauth_safe_details(
+                payload.get("message") or "OAuth 授权失败"
+            )
+
+    if not success_event:
+        return {
+            "success": False,
+            "error": error_message,
+        }
+    return {
+        "success": True,
+        "email": str(success_event.get("email") or ""),
+        "account_id": int(success_event["account_id"]),
+        "created": bool(success_event.get("created")),
+        "client_id": str(success_event.get("client_id") or OAUTH_CLIENT_ID),
+    }
+
+
+@app.route('/api/external/outlook/import-authorize', methods=['POST'])
+@csrf_exempt
+@api_key_required
+def api_external_outlook_import_authorize():
+    """导入邮箱密码，并同步完成默认客户端的 IMAP OAuth 授权与前置测活。"""
+    data = request.get_json(silent=True) or {}
+    email = str(data.get('email') or '').strip()
+    password = str(data.get('password') or '')
+    remark = str(data.get('remark') or '').strip()
+    if not email or not password:
+        return jsonify({
+            'success': False,
+            'error': '请求体需包含非空 email 和 password',
+        }), 400
+
+    upload_result = upsert_upload_account_for_auto_auth(email, password, remark)
+    if upload_result.get('status') == 'invalid':
+        return jsonify({'success': False, 'error': '邮箱或密码格式无效'}), 400
+    get_db().commit()
+
+    result = run_graph_oauth_task_sync(int(upload_result['id']), mode='imap')
+    if not result.get('success'):
+        # 不透传 OAuth details、密码或 token；上传记录保留，便于后台排查或重试。
+        return jsonify({
+            'success': False,
+            'email': upload_result['email'],
+            'error': result.get('error') or 'OAuth 授权失败',
+        }), 422
+
+    return jsonify({
+        **result,
+        'upload_status': upload_result['status'],
+    })
+
+
 @app.route('/api/oauth/graph-extract-token', methods=['POST'])
 @login_required
 def api_graph_extract_token():
