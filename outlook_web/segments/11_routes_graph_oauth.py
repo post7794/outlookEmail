@@ -496,14 +496,16 @@ def run_graph_oauth_task(account_id: int, output_queue: "queue.Queue[Dict[str, A
             mode = normalize_graph_oauth_mode(mode)
             upload_row = get_upload_account_for_graph_auth(account_id)
             if not upload_row:
-                emit({"type": "error", "success": False, "mode": mode, "message": "上传账号不存在"})
+                emit({"type": "error", "success": False, "mode": mode,
+                      "error_code": "input_invalid", "message": "上传账号不存在"})
                 emit({"type": "complete", "success": False})
                 return
 
             email = str(upload_row['email'] or '').strip()
             password = get_upload_account_plain_password(upload_row)
             if not email or not password:
-                emit({"type": "error", "success": False, "mode": mode, "message": "邮箱或密码为空"})
+                emit({"type": "error", "success": False, "mode": mode,
+                      "error_code": "input_invalid", "message": "邮箱或密码为空"})
                 emit({"type": "complete", "success": False})
                 return
 
@@ -523,6 +525,7 @@ def run_graph_oauth_task(account_id: int, output_queue: "queue.Queue[Dict[str, A
                     "type": "error",
                     "success": False,
                     "mode": mode,
+                    "error_code": "oauth_failed",
                     "message": graph_oauth_safe_details(result.get("error") or "授权失败"),
                     "details": graph_oauth_safe_details(result.get("details") or ""),
                 })
@@ -538,6 +541,7 @@ def run_graph_oauth_task(account_id: int, output_queue: "queue.Queue[Dict[str, A
                     "type": "error",
                     "success": False,
                     "mode": mode,
+                    "error_code": "token_validation_failed",
                     "message": f"{mode_label} refresh_token 验证失败",
                     "details": graph_oauth_safe_details(error_msg),
                 })
@@ -557,6 +561,7 @@ def run_graph_oauth_task(account_id: int, output_queue: "queue.Queue[Dict[str, A
                         "type": "error",
                         "success": False,
                         "mode": mode,
+                        "error_code": "imap_probe_failed",
                         "message": "IMAP 前置测活失败",
                         "details": graph_oauth_safe_details(
                             f"{mailbox_probe.get('error_code')}: "
@@ -590,6 +595,7 @@ def run_graph_oauth_task(account_id: int, output_queue: "queue.Queue[Dict[str, A
                 "type": "error",
                 "success": False,
                 "mode": normalize_graph_oauth_mode(mode),
+                "error_code": "platform_config_error",
                 "message": "授权任务异常",
                 "details": graph_oauth_safe_details(str(exc)),
             })
@@ -605,6 +611,7 @@ def run_graph_oauth_task_sync(account_id: int, mode: str = "imap") -> Dict[str, 
 
     success_event: Optional[Dict[str, Any]] = None
     error_message = "OAuth 授权失败"
+    error_code = "platform_config_error"
     while True:
         payload = output_queue.get()
         if payload is GRAPH_OAUTH_DONE:
@@ -614,6 +621,12 @@ def run_graph_oauth_task_sync(account_id: int, mode: str = "imap") -> Dict[str, 
         if payload.get("type") == "success" and payload.get("success"):
             success_event = payload
         elif payload.get("type") == "error":
+            candidate_code = str(payload.get("error_code") or "").strip()
+            if candidate_code in {
+                "input_invalid", "oauth_failed", "token_validation_failed",
+                "imap_probe_failed", "platform_config_error",
+            }:
+                error_code = candidate_code
             error_message = graph_oauth_safe_details(
                 payload.get("message") or "OAuth 授权失败"
             )
@@ -621,6 +634,7 @@ def run_graph_oauth_task_sync(account_id: int, mode: str = "imap") -> Dict[str, 
     if not success_event:
         return {
             "success": False,
+            "error_code": error_code,
             "error": error_message,
         }
     return {
@@ -644,12 +658,17 @@ def api_external_outlook_import_authorize():
     if not email or not password:
         return jsonify({
             'success': False,
+            'error_code': 'input_invalid',
             'error': '请求体需包含非空 email 和 password',
         }), 400
 
     upload_result = upsert_upload_account_for_auto_auth(email, password, remark)
     if upload_result.get('status') == 'invalid':
-        return jsonify({'success': False, 'error': '邮箱或密码格式无效'}), 400
+        return jsonify({
+            'success': False,
+            'error_code': 'input_invalid',
+            'error': '邮箱或密码格式无效',
+        }), 400
     get_db().commit()
 
     result = run_graph_oauth_task_sync(int(upload_result['id']), mode='imap')
@@ -657,12 +676,15 @@ def api_external_outlook_import_authorize():
         # 不透传 OAuth details、密码或 token；上传记录保留，便于后台排查或重试。
         return jsonify({
             'success': False,
-            'email': upload_result['email'],
-            'error': result.get('error') or 'OAuth 授权失败',
+            'error_code': result.get('error_code') or 'platform_config_error',
+            'error': '导入授权失败',
         }), 422
 
     return jsonify({
-        **result,
+        'success': True,
+        'account_id': result['account_id'],
+        'created': result['created'],
+        'client_id': result['client_id'],
         'upload_status': upload_result['status'],
     })
 

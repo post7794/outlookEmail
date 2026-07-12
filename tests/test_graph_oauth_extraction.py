@@ -311,6 +311,7 @@ class GraphOauthRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertTrue(payload['success'])
+        self.assertNotIn('email', payload)
         self.assertEqual(payload['client_id'], web_outlook_app.OAUTH_CLIENT_ID)
         self.assertEqual(payload['upload_status'], 'added')
         response_text = response.get_data(as_text=True)
@@ -355,7 +356,8 @@ class GraphOauthRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         payload = response.get_json()
         self.assertFalse(payload['success'])
-        self.assertEqual(payload['email'], 'failed@example.com')
+        self.assertEqual(payload['error_code'], 'oauth_failed')
+        self.assertNotIn('email', payload)
         response_text = response.get_data(as_text=True)
         self.assertNotIn('mail-secret', response_text)
         self.assertNotIn('token-secret', response_text)
@@ -369,6 +371,60 @@ class GraphOauthRouteTests(unittest.TestCase):
         self.assertIsNotNone(upload)
         self.assertNotEqual(upload['password'], 'mail-secret')
         self.assertEqual(upload['is_authorized'], 0)
+
+    def test_external_import_authorize_reports_token_validation_failure_code(self):
+        with patch.object(web_outlook_app, 'extract_graph_refresh_token', return_value={
+            'success': True,
+            'refresh_token': 'refresh-secret',
+            'client_id': web_outlook_app.OAUTH_CLIENT_ID,
+        }), patch.object(web_outlook_app, 'test_refresh_token', return_value=(
+            False, 'invalid_grant refresh-secret', ''
+        )):
+            response = self.client.post(
+                '/api/external/outlook/import-authorize',
+                headers=self._external_headers(),
+                json={'email': 'token-failed@example.com', 'password': 'mail-secret'},
+            )
+
+        self.assertEqual(response.status_code, 422)
+        payload = response.get_json()
+        self.assertEqual(payload['error_code'], 'token_validation_failed')
+        self.assertNotIn('email', payload)
+        self.assertNotIn('refresh-secret', response.get_data(as_text=True))
+
+    def test_external_import_authorize_reports_imap_probe_failure_code(self):
+        with patch.object(web_outlook_app, 'extract_graph_refresh_token', return_value={
+            'success': True,
+            'refresh_token': 'refresh-secret',
+            'client_id': web_outlook_app.OAUTH_CLIENT_ID,
+        }), patch.object(web_outlook_app, 'test_refresh_token', return_value=(
+            True, None, 'rotated-secret'
+        )), patch.object(web_outlook_app, 'probe_imap_mailbox_access', return_value={
+            'success': False,
+            'error_code': 'IMAP_AUTH_FAILED',
+            'error_message': 'server details',
+        }):
+            response = self.client.post(
+                '/api/external/outlook/import-authorize',
+                headers=self._external_headers(),
+                json={'email': 'imap-failed@example.com', 'password': 'mail-secret'},
+            )
+
+        self.assertEqual(response.status_code, 422)
+        payload = response.get_json()
+        self.assertEqual(payload['error_code'], 'imap_probe_failed')
+        self.assertNotIn('email', payload)
+        self.assertNotIn('server details', response.get_data(as_text=True))
+
+    def test_external_import_authorize_input_error_has_stable_code(self):
+        response = self.client.post(
+            '/api/external/outlook/import-authorize',
+            headers=self._external_headers(),
+            json={'email': '', 'password': ''},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['error_code'], 'input_invalid')
 
     def test_post_requires_existing_upload_account_id(self):
         response = self.client.post('/api/oauth/graph-extract-token', json={})
