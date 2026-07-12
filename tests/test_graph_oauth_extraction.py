@@ -289,7 +289,8 @@ class GraphOauthRouteTests(unittest.TestCase):
             'refresh_token': 'fresh-refresh-token',
             'client_id': 'graph-client-id',
         }) as extract_mock, \
-             patch.object(web_outlook_app, 'test_refresh_token', return_value=(True, None, 'rotated-refresh-token')):
+             patch.object(web_outlook_app, 'test_refresh_token', return_value=(True, None, 'rotated-refresh-token')), \
+             patch.object(web_outlook_app, 'probe_imap_mailbox_access', return_value={'success': True}):
             body, events = self._consume_stream(self._start_graph_task(account_id))
 
         extract_mock.assert_called_once()
@@ -346,7 +347,8 @@ class GraphOauthRouteTests(unittest.TestCase):
             'success': True,
             'refresh_token': 'updated-refresh',
             'client_id': 'updated-client',
-        }), patch.object(web_outlook_app, 'test_refresh_token', return_value=(True, None, '')):
+        }), patch.object(web_outlook_app, 'test_refresh_token', return_value=(True, None, '')), \
+             patch.object(web_outlook_app, 'probe_imap_mailbox_access', return_value={'success': True}):
             _, events = self._consume_stream(self._start_graph_task(account_id))
 
         self.assertTrue(events[-1]['success'])
@@ -389,7 +391,8 @@ class GraphOauthRouteTests(unittest.TestCase):
             'refresh_token': 'imap-refresh-token',
             'client_id': 'imap-client-id',
         }) as extract_mock, \
-             patch.object(web_outlook_app, 'test_refresh_token', return_value=(True, None, '')):
+             patch.object(web_outlook_app, 'test_refresh_token', return_value=(True, None, '')), \
+             patch.object(web_outlook_app, 'probe_imap_mailbox_access', return_value={'success': True}):
             _, events = self._consume_stream(self._start_graph_task(account_id))
 
         self.assertTrue(events[-1]['success'])
@@ -419,6 +422,33 @@ class GraphOauthRouteTests(unittest.TestCase):
         self.assertIsNone(formal)
         self.assertEqual(upload['is_authorized'], 0)
         self.assertEqual(web_outlook_app.decrypt_data(upload['password']), 'mail-password')
+
+    def test_stream_imap_preflight_failure_does_not_import(self):
+        account_id = self._add_upload_account(email='imap-dead@example.com')
+        with patch.object(web_outlook_app, 'extract_graph_refresh_token', return_value={
+            'success': True,
+            'refresh_token': 'refresh-token',
+            'client_id': 'client-id',
+        }), patch.object(
+            web_outlook_app,
+            'test_refresh_token',
+            return_value=(True, None, 'rotated-token'),
+        ), patch.object(web_outlook_app, 'probe_imap_mailbox_access', return_value={
+            'success': False,
+            'result_class': 'auth',
+            'error_code': 'IMAP_AUTH_FAILED',
+            'error_message': 'authentication failed',
+        }):
+            _body, events = self._consume_stream(self._start_graph_task(account_id))
+
+        self.assertFalse(events[-1]['success'])
+        with self.app.app_context():
+            self.assertIsNone(web_outlook_app.get_account_by_email('imap-dead@example.com'))
+            upload = web_outlook_app.get_db().execute(
+                'SELECT is_authorized FROM outlook_upload_accounts WHERE id = ?',
+                (account_id,),
+            ).fetchone()
+        self.assertEqual(upload['is_authorized'], 0)
 
     # --- Task 3.1: Successful auth overwrites formal account credentials ---
 
@@ -450,7 +480,8 @@ class GraphOauthRouteTests(unittest.TestCase):
             'success': True,
             'refresh_token': 'new-refresh-token',
             'client_id': 'new-client-id',
-        }), patch.object(web_outlook_app, 'test_refresh_token', return_value=(True, None, 'rotated-token')):
+        }), patch.object(web_outlook_app, 'test_refresh_token', return_value=(True, None, 'rotated-token')), \
+             patch.object(web_outlook_app, 'probe_imap_mailbox_access', return_value={'success': True}):
             _, events = self._consume_stream(self._start_graph_task(account_id))
 
         self.assertTrue(events[-1]['success'])
@@ -518,7 +549,8 @@ class GraphOauthRouteTests(unittest.TestCase):
             'success': True,
             'refresh_token': 'new-refresh',
             'client_id': 'new-client',
-        }), patch.object(web_outlook_app, 'test_refresh_token', return_value=(True, None, '')):
+        }), patch.object(web_outlook_app, 'test_refresh_token', return_value=(True, None, '')), \
+             patch.object(web_outlook_app, 'probe_imap_mailbox_access', return_value={'success': True}):
             _, events = self._consume_stream(self._start_graph_task(account_id))
 
         self.assertTrue(events[-1]['success'])

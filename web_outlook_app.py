@@ -24,6 +24,7 @@ SEGMENT_FILES = (
     "09_routes_system_update.py",
     "10_routes_email_shares.py",
     "11_routes_graph_oauth.py",
+    "12_account_health_worker.py",
 )
 
 SEGMENTS_DIR = Path(__file__).resolve().parent / "outlook_web" / "segments"
@@ -37,6 +38,10 @@ def _load_segmented_app():
         segment_path = SEGMENTS_DIR / segment_name
         code = compile(segment_path.read_text(encoding="utf-8"), str(segment_path), "exec")
         exec(code, globals())
+
+    # Start background jobs only after all segments (including optional health
+    # workers) have registered their functions.
+    ensure_scheduler_started()
 
 _load_segmented_app()
 

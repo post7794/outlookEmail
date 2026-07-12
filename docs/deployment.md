@@ -136,6 +136,12 @@ docker-compose down
 | `CLOUDFLARE_ADMIN_PASSWORD` | Cloudflare 管理密码，也兼容读取 `ADMIN_PASSWORD` | 空 |
 | `OAUTH_CLIENT_ID` | OAuth 客户端 ID | `建议使用自己的，如果实在搞不到不填的话会使用默认的` |
 | `OAUTH_REDIRECT_URI` | OAuth 重定向 URI | `建议使用自己的，如果实在搞不到不填的话会使用默认的` |
+| `ACCOUNT_HEALTH_WORKER_ENABLED` | 启用账号分层测活 Worker | `false` |
+| `ACCOUNT_HEALTH_POLL_SECONDS` | 扫描到期账号的周期（秒，最小60） | `60` |
+| `ACCOUNT_HEALTH_BATCH_SIZE` | 每轮最多处理账号数 | `20` |
+| `ACCOUNT_HEALTH_ACCOUNT_DELAY_SECONDS` | 账号之间的请求间隔 | `5` |
+| `ACCOUNT_HEALTH_AUTO_DELETE_ENABLED` | 自动删除超过隔离期的账号；建议先保持关闭 | `false` |
+| `ACCOUNT_HEALTH_DELETE_AFTER_HOURS` | 隔离后可删除等待时间 | `168` |
 
 **生成 SECRET_KEY：**
 ```bash

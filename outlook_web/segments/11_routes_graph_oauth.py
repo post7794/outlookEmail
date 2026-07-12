@@ -426,6 +426,7 @@ def upsert_graph_authorized_account(email: str, password: str, client_id: str,
             ''',
             (encrypted_password, client_id, encrypted_refresh_token, account_id),
         )
+        enroll_account_health(account_id, db=db)
         return {"account_id": account_id, "created": False}
 
     cursor = db.execute(ACCOUNT_INSERT_SQL, build_account_insert_values(
@@ -456,6 +457,7 @@ def upsert_graph_authorized_account(email: str, password: str, client_id: str,
         ''',
         (account_id,),
     )
+    enroll_account_health(account_id, db=db)
     return {"account_id": account_id, "created": True}
 
 
@@ -543,6 +545,30 @@ def run_graph_oauth_task(account_id: int, output_queue: "queue.Queue[Dict[str, A
                 return
 
             token_to_save = rotated_refresh_token or refresh_token
+            if mode == 'imap':
+                log('验证 IMAP XOAUTH2、SELECT INBOX 与 NOOP')
+                mailbox_probe = probe_imap_mailbox_access(
+                    email,
+                    client_id,
+                    token_to_save,
+                )
+                if not mailbox_probe.get('success'):
+                    emit({
+                        "type": "error",
+                        "success": False,
+                        "mode": mode,
+                        "message": "IMAP 前置测活失败",
+                        "details": graph_oauth_safe_details(
+                            f"{mailbox_probe.get('error_code')}: "
+                            f"{mailbox_probe.get('error_message')}"
+                        ),
+                    })
+                    emit({"type": "complete", "success": False})
+                    return
+                token_to_save = (
+                    str(mailbox_probe.get('rotated_refresh_token') or '').strip()
+                    or token_to_save
+                )
             save_result = save_graph_authorization_result(upload_row, client_id, token_to_save)
             emit({
                 "type": "success",

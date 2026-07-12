@@ -1267,6 +1267,13 @@ def serialize_account_summary(account: Dict[str, Any], last_refresh_log: Optiona
         'last_refresh_at': refresh_state['last_refresh_at'],
         'last_refresh_status': refresh_state['last_refresh_status'],
         'last_refresh_error': refresh_state['last_refresh_error'],
+        'health_status': account.get('health_status', 'pending'),
+        'health_enrolled_at': account.get('health_enrolled_at', ''),
+        'next_health_check_at': account.get('next_health_check_at', ''),
+        'consecutive_auth_failures': int(account.get('consecutive_auth_failures') or 0),
+        'transient_failure_count': int(account.get('transient_failure_count') or 0),
+        'last_health_error_code': account.get('last_health_error_code') or None,
+        'quarantined_at': account.get('quarantined_at', ''),
         'created_at': account.get('created_at', ''),
         'updated_at': account.get('updated_at', ''),
         'tags': account.get('tags', [])

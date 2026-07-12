@@ -1301,6 +1301,14 @@ def init_db():
             last_refresh_status TEXT DEFAULT 'never',
             last_refresh_error TEXT,
             refresh_token_updated_at TIMESTAMP,
+            health_enrolled_at TIMESTAMP,
+            next_health_check_at TIMESTAMP,
+            health_status TEXT DEFAULT 'pending',
+            consecutive_auth_failures INTEGER NOT NULL DEFAULT 0,
+            transient_failure_count INTEGER NOT NULL DEFAULT 0,
+            last_health_error_code TEXT,
+            quarantined_at TIMESTAMP,
+            health_delete_after_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (group_id) REFERENCES groups (id)
@@ -1753,6 +1761,36 @@ def init_db():
         cursor.execute('ALTER TABLE accounts ADD COLUMN fallback_proxy_url_1 TEXT')
     if 'fallback_proxy_url_2' not in columns:
         cursor.execute('ALTER TABLE accounts ADD COLUMN fallback_proxy_url_2 TEXT')
+    if 'health_enrolled_at' not in columns:
+        cursor.execute('ALTER TABLE accounts ADD COLUMN health_enrolled_at TIMESTAMP')
+    if 'next_health_check_at' not in columns:
+        cursor.execute('ALTER TABLE accounts ADD COLUMN next_health_check_at TIMESTAMP')
+    if 'health_status' not in columns:
+        cursor.execute("ALTER TABLE accounts ADD COLUMN health_status TEXT DEFAULT 'pending'")
+    if 'consecutive_auth_failures' not in columns:
+        cursor.execute('ALTER TABLE accounts ADD COLUMN consecutive_auth_failures INTEGER NOT NULL DEFAULT 0')
+    if 'transient_failure_count' not in columns:
+        cursor.execute('ALTER TABLE accounts ADD COLUMN transient_failure_count INTEGER NOT NULL DEFAULT 0')
+    if 'last_health_error_code' not in columns:
+        cursor.execute('ALTER TABLE accounts ADD COLUMN last_health_error_code TEXT')
+    if 'quarantined_at' not in columns:
+        cursor.execute('ALTER TABLE accounts ADD COLUMN quarantined_at TIMESTAMP')
+    if 'health_delete_after_at' not in columns:
+        cursor.execute('ALTER TABLE accounts ADD COLUMN health_delete_after_at TIMESTAMP')
+
+    cursor.execute('''
+        UPDATE accounts
+        SET health_enrolled_at = COALESCE(health_enrolled_at, created_at, CURRENT_TIMESTAMP),
+            next_health_check_at = COALESCE(next_health_check_at, last_refresh_at, CURRENT_TIMESTAMP),
+            health_status = COALESCE(NULLIF(health_status, ''), 'pending')
+        WHERE status = 'active'
+          AND COALESCE(account_type, 'outlook') = 'outlook'
+          AND COALESCE(refresh_token, '') != ''
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_accounts_health_due
+        ON accounts(status, account_type, next_health_check_at)
+    ''')
     
     # 检查 groups 表是否有 is_system 列
     cursor.execute("PRAGMA table_info(groups)")

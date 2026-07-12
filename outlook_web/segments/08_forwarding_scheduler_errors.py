@@ -1375,6 +1375,7 @@ def init_scheduler():
                     safe_console_print("✓ 定时刷新已禁用")
 
                 jobs_added = add_webdav_backup_job(scheduler, CronTrigger, app_tzinfo) or jobs_added
+                jobs_added = add_account_health_job(scheduler, IntervalTrigger, app_tzinfo) or jobs_added
 
                 if not jobs_added:
                     return None
@@ -1452,9 +1453,6 @@ def scheduled_refresh_task():
 
     except Exception as e:
         safe_console_print(f"[定时任务] 执行失败：{str(e)}")
-
-
-ensure_scheduler_started()
 
 
 def trigger_refresh_internal():

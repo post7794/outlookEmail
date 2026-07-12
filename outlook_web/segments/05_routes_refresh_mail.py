@@ -674,50 +674,108 @@ def log_forwarding_result(account_id: int, account_email: str, message_id: str, 
         return False
 
 
+def _token_failure_from_response(response, source: str) -> Dict[str, Any]:
+    from outlook_web.account_health import classify_token_failure
+
+    payload = {}
+    try:
+        payload = response.json() or {}
+    except Exception:
+        payload = {}
+    error = str(payload.get('error') or '').strip()
+    description = str(
+        payload.get('error_description')
+        or payload.get('error_message')
+        or getattr(response, 'text', '')
+        or getattr(response, 'reason', '')
+        or '未知错误'
+    )
+    classified = classify_token_failure(
+        status_code=int(getattr(response, 'status_code', 0) or 0),
+        error=error,
+        description=description,
+    )
+    return {
+        **classified,
+        'source': source,
+        'error_message': sanitize_error_details(description)[:500],
+        'status_code': int(getattr(response, 'status_code', 0) or 0),
+    }
+
+
+def probe_refresh_token(client_id: str, refresh_token: str, proxy_url: str = None,
+                        fallback_proxy_urls: List[str] = None) -> Dict[str, Any]:
+    """结构化测试 refresh token，避免把平台/网络故障归咎于账号。"""
+    from outlook_web.account_health import classify_token_failure, combine_probe_failures
+
+    failures = []
+    for source, request_func, kwargs in (
+        (
+            'graph',
+            request_graph_token_response,
+            {'include_original_scope_fallback': True},
+        ),
+        ('imap', request_imap_token_response, {}),
+    ):
+        try:
+            response = request_func(
+                client_id,
+                refresh_token,
+                proxy_url=proxy_url,
+                fallback_proxy_urls=fallback_proxy_urls,
+                **kwargs,
+            )
+        except Exception as exc:
+            classified = classify_token_failure(exception=exc)
+            failures.append({
+                **classified,
+                'source': source,
+                'error_message': sanitize_error_details(str(exc))[:500],
+                'status_code': 0,
+            })
+            continue
+
+        if response.status_code == 200:
+            payload = {}
+            try:
+                payload = response.json() or {}
+            except Exception:
+                payload = {}
+            return {
+                'success': True,
+                'result_class': 'success',
+                'error_code': '',
+                'error_message': '',
+                'source': source,
+                'rotated_refresh_token': str(payload.get('refresh_token') or '').strip(),
+            }
+        failures.append(_token_failure_from_response(response, source))
+
+    combined = combine_probe_failures(failures)
+    messages = [
+        f"{row.get('source')}: {row.get('error_message')}"
+        for row in failures
+        if row.get('error_message')
+    ]
+    return {
+        'success': False,
+        'result_class': combined.get('result_class') or 'transient',
+        'error_code': combined.get('error_code') or 'token_probe_failed',
+        'error_message': '; '.join(messages)[:500] or 'Token 刷新失败',
+        'source': combined.get('source') or '',
+        'rotated_refresh_token': '',
+    }
+
+
 def test_refresh_token(client_id: str, refresh_token: str, proxy_url: str = None,
                        fallback_proxy_urls: List[str] = None) -> tuple[bool, Optional[str], str]:
-    """测试 refresh token 是否有效，返回 (是否成功, 错误信息, 新 refresh_token)"""
-    try:
-        graph_res = request_graph_token_response(
-            client_id,
-            refresh_token,
-            proxy_url=proxy_url,
-            fallback_proxy_urls=fallback_proxy_urls,
-            include_original_scope_fallback=True,
-        )
-    except Exception as e:
-        return False, f"Graph 刷新请求异常: {str(e)}", ''
-
-    if graph_res.status_code == 200:
-        payload = {}
-        try:
-            payload = graph_res.json()
-        except Exception:
-            payload = {}
-        return True, None, str(payload.get('refresh_token') or '').strip()
-
-    graph_error_msg = extract_token_response_error(graph_res)
-
-    try:
-        imap_res = request_imap_token_response(
-            client_id,
-            refresh_token,
-            proxy_url=proxy_url,
-            fallback_proxy_urls=fallback_proxy_urls,
-        )
-    except Exception as e:
-        return False, f"Graph 刷新失败: {graph_error_msg}; IMAP 刷新请求异常: {str(e)}", ''
-
-    if imap_res.status_code == 200:
-        payload = {}
-        try:
-            payload = imap_res.json()
-        except Exception:
-            payload = {}
-        return True, None, str(payload.get('refresh_token') or '').strip()
-
-    imap_error_msg = extract_token_response_error(imap_res)
-    return False, f"Graph 刷新失败: {graph_error_msg}; IMAP 刷新失败: {imap_error_msg}", ''
+    """兼容旧调用方的 tuple 接口。"""
+    result = probe_refresh_token(client_id, refresh_token, proxy_url, fallback_proxy_urls)
+    return (
+        bool(result.get('success')),
+        None if result.get('success') else str(result.get('error_message') or 'Token 刷新失败'),
+        str(result.get('rotated_refresh_token') or ''),
+    )
 
 
 def refresh_outlook_account_token(account: sqlite3.Row, refresh_type: str = 'manual',

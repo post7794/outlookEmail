@@ -298,6 +298,12 @@ def get_access_token_graph_result(client_id: str, refresh_token: str, proxy_url:
             details = get_response_details(res)
             return {
                 "success": False,
+                "status_code": int(res.status_code or 0),
+                "oauth_error": str(details.get("error") or "") if isinstance(details, dict) else "",
+                "oauth_error_description": (
+                    str(details.get("error_description") or "")
+                    if isinstance(details, dict) else str(details or "")
+                ),
                 "error": build_error_payload(
                     "GRAPH_TOKEN_FAILED",
                     "获取访问令牌失败",
@@ -321,7 +327,11 @@ def get_access_token_graph_result(client_id: str, refresh_token: str, proxy_url:
                 )
             }
 
-        return {"success": True, "access_token": access_token}
+        return {
+            "success": True,
+            "access_token": access_token,
+            "rotated_refresh_token": str(payload.get("refresh_token") or "").strip(),
+        }
     except Exception as exc:
         return {
             "success": False,
@@ -779,7 +789,11 @@ def get_access_token_imap_result(client_id: str, refresh_token: str, proxy_url: 
                 )
             }
 
-        return {"success": True, "access_token": access_token}
+        return {
+            "success": True,
+            "access_token": access_token,
+            "rotated_refresh_token": str(payload.get("refresh_token") or "").strip(),
+        }
     except Exception as exc:
         return {
             "success": False,
