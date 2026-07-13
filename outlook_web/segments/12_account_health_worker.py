@@ -11,6 +11,7 @@ from outlook_web.account_health import (
 
 
 account_health_run_lock = threading.Lock()
+IMAP_AUTHENTICATED_NOT_CONNECTED_MESSAGE = 'User is authenticated but not connected.'
 
 
 def probe_imap_mailbox_access(email_addr: str, client_id: str, refresh_token: str,
@@ -72,11 +73,19 @@ def probe_imap_mailbox_access(email_addr: str, client_id: str, refresh_token: st
             'rotated_refresh_token': str(token_result.get('rotated_refresh_token') or '').strip(),
         }
     except imaplib.IMAP4.error as exc:
+        error_message = str(exc).strip()
+        if error_message == IMAP_AUTHENTICATED_NOT_CONNECTED_MESSAGE:
+            return {
+                'success': False,
+                'result_class': 'transient',
+                'error_code': 'IMAP_AUTHENTICATED_NOT_CONNECTED',
+                'error_message': error_message,
+            }
         return {
             'success': False,
             'result_class': 'auth',
             'error_code': 'IMAP_AUTH_FAILED',
-            'error_message': sanitize_error_details(str(exc)),
+            'error_message': sanitize_error_details(error_message),
         }
     except Exception as exc:
         return {
@@ -91,6 +100,90 @@ def probe_imap_mailbox_access(email_addr: str, client_id: str, refresh_token: st
                 mail.logout()
             except Exception:
                 pass
+
+
+def probe_graph_mailbox_access(client_id: str, refresh_token: str,
+                               proxy_url: str = None, fallback_proxy_urls=None):
+    """Verify Graph can refresh the token and access the real Inbox resource."""
+    token_result = get_access_token_graph_result(
+        client_id,
+        refresh_token,
+        proxy_url,
+        fallback_proxy_urls,
+    )
+    if not token_result.get('success'):
+        error = token_result.get('error') or {}
+        classification = classify_token_failure(
+            status_code=int(token_result.get('status_code') or error.get('status') or 0),
+            error=str(token_result.get('oauth_error') or ''),
+            description=str(
+                token_result.get('oauth_error_description')
+                or error.get('details')
+                or error.get('message')
+                or ''
+            ),
+        )
+        return {
+            'success': False,
+            'result_class': classification['result_class'],
+            'error_code': str(
+                classification['error_code'] or error.get('code') or 'GRAPH_TOKEN_FAILED'
+            ),
+            'error_message': sanitize_error_details(
+                str(error.get('message') or 'Graph Token 获取失败')
+            ),
+        }
+
+    try:
+        response = get_with_proxy_fallback(
+            'https://graph.microsoft.com/v1.0/me/mailFolders/inbox',
+            headers={'Authorization': f"Bearer {token_result.get('access_token') or ''}"},
+            params={'$select': 'id,displayName,totalItemCount,unreadItemCount'},
+            timeout=HTTP_REQUEST_TIMEOUT,
+            proxy_url=proxy_url,
+            fallback_proxy_urls=fallback_proxy_urls,
+        )
+        status_code = int(getattr(response, 'status_code', 0) or 0)
+        if 200 <= status_code < 300:
+            return {
+                'success': True,
+                'result_class': 'success',
+                'error_code': '',
+                'error_message': '',
+                'rotated_refresh_token': str(
+                    token_result.get('rotated_refresh_token') or ''
+                ).strip(),
+            }
+
+        details = get_response_details(response)
+        graph_error = details.get('error') if isinstance(details, dict) else None
+        if isinstance(graph_error, dict):
+            graph_code = str(graph_error.get('code') or '')
+            graph_message = str(graph_error.get('message') or '')
+        else:
+            graph_code = str(graph_error or '') if isinstance(details, dict) else ''
+            graph_message = str(details or '')
+        classification = classify_token_failure(
+            status_code=status_code,
+            error=graph_code,
+            description=graph_message,
+        )
+        return {
+            'success': False,
+            'result_class': classification['result_class'],
+            'error_code': str(
+                classification['error_code'] or graph_code or f'GRAPH_INBOX_HTTP_{status_code}'
+            ),
+            'error_message': sanitize_error_details(graph_message or 'Graph Inbox 访问失败'),
+        }
+    except Exception as exc:
+        classification = classify_token_failure(exception=exc)
+        return {
+            'success': False,
+            'result_class': classification['result_class'],
+            'error_code': str(classification['error_code'] or type(exc).__name__),
+            'error_message': sanitize_error_details(str(exc)),
+        }
 
 
 def account_health_worker_enabled() -> bool:
@@ -365,13 +458,20 @@ def check_account_health(account, db=None, now=None):
                 str(result.get('rotated_refresh_token') or '').strip()
                 or refresh_token
             )
-            mailbox_result = probe_imap_mailbox_access(
-                str(account['email'] or ''),
+            mailbox_result = probe_graph_mailbox_access(
                 str(account['client_id'] or ''),
                 token_for_mailbox,
                 proxy_url,
                 fallback_urls,
             )
+            if not mailbox_result.get('success'):
+                mailbox_result = probe_imap_mailbox_access(
+                    str(account['email'] or ''),
+                    str(account['client_id'] or ''),
+                    token_for_mailbox,
+                    proxy_url,
+                    fallback_urls,
+                )
             if mailbox_result.get('success'):
                 result['rotated_refresh_token'] = (
                     str(mailbox_result.get('rotated_refresh_token') or '').strip()

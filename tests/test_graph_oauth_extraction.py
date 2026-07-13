@@ -416,6 +416,77 @@ class GraphOauthRouteTests(unittest.TestCase):
         self.assertNotIn('email', payload)
         self.assertNotIn('server details', response.get_data(as_text=True))
 
+    def test_external_import_falls_back_to_graph_only_for_not_connected(self):
+        with patch.object(web_outlook_app, 'extract_graph_refresh_token', side_effect=[
+            {
+                'success': True,
+                'refresh_token': 'imap-refresh',
+                'client_id': web_outlook_app.OAUTH_CLIENT_ID,
+            },
+            {
+                'success': True,
+                'refresh_token': 'graph-refresh',
+                'client_id': web_outlook_app.OAUTH_CLIENT_ID,
+            },
+        ]) as extract_mock, patch.object(web_outlook_app, 'test_refresh_token', return_value=(
+            True, None, 'imap-rotated'
+        )), patch.object(web_outlook_app, 'probe_imap_mailbox_access', return_value={
+            'success': False,
+            'result_class': 'transient',
+            'error_code': 'IMAP_AUTHENTICATED_NOT_CONNECTED',
+            'error_message': 'User is authenticated but not connected.',
+        }), patch.object(web_outlook_app, 'probe_graph_mailbox_access', return_value={
+            'success': True,
+            'result_class': 'success',
+            'rotated_refresh_token': 'graph-rotated',
+        }) as graph_probe:
+            response = self.client.post(
+                '/api/external/outlook/import-authorize',
+                headers=self._external_headers(),
+                json={'email': 'graph-fallback@example.com', 'password': 'mail-secret'},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(extract_mock.call_count, 2)
+        self.assertEqual(extract_mock.call_args_list[0].kwargs['scope'], web_outlook_app.GRAPH_EXTRACT_SCOPE)
+        self.assertEqual(extract_mock.call_args_list[1].kwargs['scope'], web_outlook_app.GRAPH_EXTRACT_GRAPH_SCOPE)
+        graph_probe.assert_called_once_with(web_outlook_app.OAUTH_CLIENT_ID, 'graph-refresh')
+        with self.app.app_context():
+            formal = web_outlook_app.get_account_by_email('graph-fallback@example.com')
+        self.assertEqual(formal['refresh_token'], 'graph-rotated')
+
+    def test_external_import_graph_fallback_probe_failure_is_redacted(self):
+        with patch.object(web_outlook_app, 'extract_graph_refresh_token', side_effect=[
+            {
+                'success': True,
+                'refresh_token': 'imap-refresh',
+                'client_id': web_outlook_app.OAUTH_CLIENT_ID,
+            },
+            {
+                'success': True,
+                'refresh_token': 'graph-refresh',
+                'client_id': web_outlook_app.OAUTH_CLIENT_ID,
+            },
+        ]), patch.object(web_outlook_app, 'test_refresh_token', return_value=(
+            True, None, ''
+        )), patch.object(web_outlook_app, 'probe_imap_mailbox_access', return_value={
+            'success': False,
+            'error_code': 'IMAP_AUTHENTICATED_NOT_CONNECTED',
+            'error_message': 'User is authenticated but not connected.',
+        }), patch.object(web_outlook_app, 'probe_graph_mailbox_access', return_value={
+            'success': False,
+            'error_code': 'ErrorAccessDenied',
+            'error_message': 'graph-refresh secret details',
+        }):
+            response = self.client.post(
+                '/api/external/outlook/import-authorize',
+                headers=self._external_headers(),
+                json={'email': 'graph-probe-failed@example.com', 'password': 'mail-secret'},
+            )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.get_json()['error_code'], 'graph_probe_failed')
+        self.assertNotIn('graph-refresh', response.get_data(as_text=True))
+
     def test_external_import_authorize_input_error_has_stable_code(self):
         response = self.client.post(
             '/api/external/outlook/import-authorize',
@@ -530,7 +601,8 @@ class GraphOauthRouteTests(unittest.TestCase):
             'refresh_token': 'graph-refresh-token',
             'client_id': 'graph-client-id',
         }) as extract_mock, \
-             patch.object(web_outlook_app, 'test_refresh_token', return_value=(True, None, '')):
+             patch.object(web_outlook_app, 'test_refresh_token', return_value=(True, None, '')), \
+             patch.object(web_outlook_app, 'probe_graph_mailbox_access', return_value={'success': True}):
             _, events = self._consume_stream(self._start_graph_task_with_mode(account_id, 'graph'))
 
         self.assertTrue(events[-1]['success'])

@@ -557,21 +557,94 @@ def run_graph_oauth_task(account_id: int, output_queue: "queue.Queue[Dict[str, A
                     token_to_save,
                 )
                 if not mailbox_probe.get('success'):
+                    if mailbox_probe.get('error_code') == 'IMAP_AUTHENTICATED_NOT_CONNECTED':
+                        log('IMAP 邮箱尚未连接，改用 Mail.Read OAuth 验证 Graph Inbox')
+                        graph_result = extract_graph_refresh_token(
+                            email,
+                            password,
+                            scope=GRAPH_EXTRACT_GRAPH_SCOPE,
+                            log=log,
+                        )
+                        if not graph_result.get('success'):
+                            emit({
+                                "type": "error",
+                                "success": False,
+                                "mode": "graph",
+                                "error_code": "oauth_failed",
+                                "message": graph_oauth_safe_details(
+                                    graph_result.get("error") or "Graph 授权失败"
+                                ),
+                                "details": graph_oauth_safe_details(
+                                    graph_result.get("details") or ""
+                                ),
+                            })
+                            emit({"type": "complete", "success": False})
+                            return
+                        client_id = str(graph_result.get('client_id') or '').strip()
+                        graph_refresh_token = str(
+                            graph_result.get('refresh_token') or ''
+                        ).strip()
+                        graph_probe = probe_graph_mailbox_access(
+                            client_id,
+                            graph_refresh_token,
+                        )
+                        if not graph_probe.get('success'):
+                            emit({
+                                "type": "error",
+                                "success": False,
+                                "mode": "graph",
+                                "error_code": "graph_probe_failed",
+                                "message": "Graph Inbox 前置测活失败",
+                                "details": graph_oauth_safe_details(
+                                    f"{graph_probe.get('error_code')}: "
+                                    f"{graph_probe.get('error_message')}"
+                                ),
+                            })
+                            emit({"type": "complete", "success": False})
+                            return
+                        token_to_save = (
+                            str(graph_probe.get('rotated_refresh_token') or '').strip()
+                            or graph_refresh_token
+                        )
+                        mode = 'graph'
+                    else:
+                        emit({
+                            "type": "error",
+                            "success": False,
+                            "mode": mode,
+                            "error_code": "imap_probe_failed",
+                            "message": "IMAP 前置测活失败",
+                            "details": graph_oauth_safe_details(
+                                f"{mailbox_probe.get('error_code')}: "
+                                f"{mailbox_probe.get('error_message')}"
+                            ),
+                        })
+                        emit({"type": "complete", "success": False})
+                        return
+                else:
+                    token_to_save = (
+                        str(mailbox_probe.get('rotated_refresh_token') or '').strip()
+                        or token_to_save
+                    )
+            else:
+                log('验证 Graph Mail.Read 与真实 Inbox 访问')
+                graph_probe = probe_graph_mailbox_access(client_id, token_to_save)
+                if not graph_probe.get('success'):
                     emit({
                         "type": "error",
                         "success": False,
                         "mode": mode,
-                        "error_code": "imap_probe_failed",
-                        "message": "IMAP 前置测活失败",
+                        "error_code": "graph_probe_failed",
+                        "message": "Graph Inbox 前置测活失败",
                         "details": graph_oauth_safe_details(
-                            f"{mailbox_probe.get('error_code')}: "
-                            f"{mailbox_probe.get('error_message')}"
+                            f"{graph_probe.get('error_code')}: "
+                            f"{graph_probe.get('error_message')}"
                         ),
                     })
                     emit({"type": "complete", "success": False})
                     return
                 token_to_save = (
-                    str(mailbox_probe.get('rotated_refresh_token') or '').strip()
+                    str(graph_probe.get('rotated_refresh_token') or '').strip()
                     or token_to_save
                 )
             save_result = save_graph_authorization_result(upload_row, client_id, token_to_save)
@@ -624,7 +697,7 @@ def run_graph_oauth_task_sync(account_id: int, mode: str = "imap") -> Dict[str, 
             candidate_code = str(payload.get("error_code") or "").strip()
             if candidate_code in {
                 "input_invalid", "oauth_failed", "token_validation_failed",
-                "imap_probe_failed", "platform_config_error",
+                "imap_probe_failed", "graph_probe_failed", "platform_config_error",
             }:
                 error_code = candidate_code
             error_message = graph_oauth_safe_details(
@@ -650,7 +723,7 @@ def run_graph_oauth_task_sync(account_id: int, mode: str = "imap") -> Dict[str, 
 @csrf_exempt
 @api_key_required
 def api_external_outlook_import_authorize():
-    """导入邮箱密码，并同步完成默认客户端的 IMAP OAuth 授权与前置测活。"""
+    """导入邮箱密码，并同步完成 IMAP 优先、Graph 兜底的 OAuth 前置测活。"""
     data = request.get_json(silent=True) or {}
     email = str(data.get('email') or '').strip()
     password = str(data.get('password') or '')

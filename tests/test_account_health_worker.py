@@ -83,12 +83,13 @@ class AccountHealthWorkerTests(unittest.TestCase):
                 'error_code': '',
                 'error_message': '',
                 'rotated_refresh_token': 'rotated-token',
-            }), patch.object(web_outlook_app, 'probe_imap_mailbox_access', return_value={
+            }), patch.object(web_outlook_app, 'probe_graph_mailbox_access', return_value={
                 'success': True,
                 'result_class': 'success',
                 'rotated_refresh_token': '',
-            }):
+            }), patch.object(web_outlook_app, 'probe_imap_mailbox_access') as imap_mock:
                 result = web_outlook_app.check_account_health(row, db=db, now=now)
+            imap_mock.assert_not_called()
             updated = self._row(account_id)
             self.assertEqual(result['state'], 'healthy')
             self.assertEqual(updated['health_status'], 'healthy')
@@ -129,6 +130,49 @@ class AccountHealthWorkerTests(unittest.TestCase):
         self.assertEqual(result['result_class'], 'operational')
         self.assertEqual(result['error_code'], 'invalid_scope')
 
+    def test_imap_exact_authenticated_not_connected_is_transient(self):
+        fake_mail = unittest.mock.Mock()
+        fake_mail.authenticate.side_effect = web_outlook_app.imaplib.IMAP4.error(
+            web_outlook_app.IMAP_AUTHENTICATED_NOT_CONNECTED_MESSAGE
+        )
+        with patch.object(web_outlook_app, 'get_access_token_imap_result', return_value={
+            'success': True,
+            'access_token': 'access-token',
+        }), patch.object(web_outlook_app.imaplib, 'IMAP4_SSL', return_value=fake_mail):
+            result = web_outlook_app.probe_imap_mailbox_access(
+                'user@outlook.com', 'client', 'refresh-token'
+            )
+        self.assertEqual(result['result_class'], 'transient')
+        self.assertEqual(result['error_code'], 'IMAP_AUTHENTICATED_NOT_CONNECTED')
+
+    def test_graph_inbox_probe_requires_real_2xx(self):
+        response = SimpleNamespace(status_code=200)
+        with patch.object(web_outlook_app, 'get_access_token_graph_result', return_value={
+            'success': True,
+            'access_token': 'graph-access',
+            'rotated_refresh_token': 'graph-rotated',
+        }), patch.object(web_outlook_app, 'get_with_proxy_fallback', return_value=response) as get_mock:
+            result = web_outlook_app.probe_graph_mailbox_access('client', 'refresh-token')
+        self.assertTrue(result['success'])
+        self.assertEqual(result['rotated_refresh_token'], 'graph-rotated')
+        self.assertEqual(
+            get_mock.call_args.args[0],
+            'https://graph.microsoft.com/v1.0/me/mailFolders/inbox',
+        )
+
+    def test_graph_inbox_probe_rejects_non_2xx(self):
+        response = SimpleNamespace(
+            status_code=403,
+            json=lambda: {'error': {'code': 'ErrorAccessDenied', 'message': 'denied'}},
+            text='denied',
+        )
+        with patch.object(web_outlook_app, 'get_access_token_graph_result', return_value={
+            'success': True,
+            'access_token': 'graph-access',
+        }), patch.object(web_outlook_app, 'get_with_proxy_fallback', return_value=response):
+            result = web_outlook_app.probe_graph_mailbox_access('client', 'refresh-token')
+        self.assertFalse(result['success'])
+
     def test_transient_failure_never_increments_auth_count(self):
         account_id, now = self._insert_account()
         with self.app.app_context():
@@ -161,6 +205,10 @@ class AccountHealthWorkerTests(unittest.TestCase):
                 'success': True,
                 'result_class': 'success',
                 'rotated_refresh_token': '',
+            }), patch.object(web_outlook_app, 'probe_graph_mailbox_access', return_value={
+                'success': False,
+                'result_class': 'auth',
+                'error_code': 'GRAPH_FAILED',
             }), patch.object(web_outlook_app, 'probe_imap_mailbox_access', return_value={
                 'success': False,
                 'result_class': 'auth',
@@ -218,6 +266,10 @@ class AccountHealthWorkerTests(unittest.TestCase):
                 'success': True,
                 'result_class': 'success',
                 'rotated_refresh_token': '',
+            }), patch.object(web_outlook_app, 'probe_graph_mailbox_access', return_value={
+                'success': False,
+                'result_class': 'auth',
+                'error_code': 'GRAPH_FAILED',
             }), patch.object(web_outlook_app, 'probe_imap_mailbox_access', return_value={
                 'success': True,
                 'result_class': 'success',
