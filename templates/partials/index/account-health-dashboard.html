@@ -1,0 +1,90 @@
+<div class="modal" id="accountHealthModal" onmousedown="if(event.target === this) hideAccountHealthDashboard()">
+    <div class="modal-content account-health-modal-content" role="dialog" aria-modal="true" aria-labelledby="accountHealthTitle">
+        <div class="modal-header">
+            <div>
+                <h3 id="accountHealthTitle">账号测活面板</h3>
+                <p class="account-health-subtitle">查看邮箱通道状态、失败原因和后台测活进度</p>
+            </div>
+            <button class="modal-close" type="button" onclick="hideAccountHealthDashboard()" aria-label="关闭">&times;</button>
+        </div>
+        <div class="modal-body account-health-body">
+            <div id="accountHealthAlert" class="account-health-alert" role="alert" hidden></div>
+
+            <section class="account-health-summary" aria-label="测活总览">
+                <div class="account-health-card"><span>账号总数</span><strong id="healthTotalCount">--</strong></div>
+                <div class="account-health-card account-health-card--ok"><span>健康</span><strong id="healthHealthyCount">--</strong></div>
+                <div class="account-health-card account-health-card--warn"><span>待检查 / 可重试</span><strong id="healthPendingCount">--</strong></div>
+                <div class="account-health-card account-health-card--error"><span>已隔离</span><strong id="healthFailedCount">--</strong></div>
+            </section>
+
+            <section class="account-health-worker" aria-label="后台任务状态">
+                <span class="account-health-worker-dot" id="healthWorkerDot"></span>
+                <div>
+                    <strong id="healthWorkerState">后台测活状态未知</strong>
+                    <span id="healthWorkerMeta">正在获取数据…</span>
+                </div>
+            </section>
+
+            <div class="account-health-toolbar">
+                <label>搜索
+                    <input id="accountHealthQuery" type="search" placeholder="邮箱或备注"
+                        onkeydown="if(event.key === 'Enter') loadAccountHealthDashboard()">
+                </label>
+                <label>状态
+                    <select id="accountHealthStatusFilter" onchange="loadAccountHealthDashboard()">
+                        <option value="">全部</option>
+                        <option value="healthy">健康</option>
+                        <option value="pending">待检查</option>
+                        <option value="suspect">疑似失效</option>
+                        <option value="transient">临时失败</option>
+                        <option value="quarantined">已隔离</option>
+                    </select>
+                </label>
+                <label>错误
+                    <select id="accountHealthErrorFilter" onchange="loadAccountHealthDashboard()">
+                        <option value="">全部错误</option>
+                    </select>
+                </label>
+                <button class="btn btn-secondary" type="button" id="accountHealthRefreshBtn" onclick="loadAccountHealthDashboard()">刷新</button>
+                <button class="btn btn-primary" type="button" id="accountHealthRunBtn" onclick="runAccountHealthCheck('due')">立即检查到期账号</button>
+            </div>
+
+            <div class="account-health-breakdown">
+                <section>
+                    <h4>状态分布</h4>
+                    <div id="accountHealthStatusBreakdown" class="account-health-chips"><span class="account-health-muted">暂无数据</span></div>
+                </section>
+                <section>
+                    <h4>错误聚合</h4>
+                    <div id="accountHealthErrorBreakdown" class="account-health-chips"><span class="account-health-muted">暂无错误</span></div>
+                </section>
+            </div>
+
+            <section class="account-health-table-section">
+                <div class="account-health-table-heading">
+                    <h4>账号状态明细</h4>
+                    <span id="accountHealthUpdatedAt">--</span>
+                </div>
+                <div class="account-health-table-wrap">
+                    <table class="account-health-table">
+                        <thead><tr><th>账号</th><th>状态</th><th>上次检查</th><th>下次检查</th><th>认证失败</th><th>临时失败</th><th>失败原因</th></tr></thead>
+                        <tbody id="accountHealthTableBody"><tr><td colspan="7" class="account-health-empty">正在加载…</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="account-health-table-section account-health-runs-section">
+                <div class="account-health-table-heading">
+                    <h4>最近运行记录</h4>
+                    <span>保留最近 10 轮，便于发现间歇性异常</span>
+                </div>
+                <div class="account-health-table-wrap">
+                    <table class="account-health-table">
+                        <thead><tr><th>开始时间</th><th>触发方式</th><th>结果</th><th>处理/选中</th><th>异常数</th><th>错误码</th></tr></thead>
+                        <tbody id="accountHealthRunsBody"><tr><td colspan="6" class="account-health-empty">正在加载…</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </div>
+</div>

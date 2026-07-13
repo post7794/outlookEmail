@@ -1,0 +1,126 @@
+.account-health-modal-content {
+    width: min(1120px, 96vw);
+    max-width: 96vw;
+    height: min(820px, 92vh);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.account-health-subtitle {
+    margin-top: 3px;
+    color: var(--skin-text-muted);
+    font-size: 12px;
+}
+
+.account-health-body {
+    padding: 20px 24px 28px;
+    overflow: auto;
+}
+
+.account-health-alert {
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    color: var(--skin-danger);
+    background: color-mix(in srgb, var(--skin-danger) 9%, var(--skin-surface));
+    border: 1px solid color-mix(in srgb, var(--skin-danger) 30%, var(--skin-border));
+    border-radius: 8px;
+    font-size: 13px;
+}
+
+.account-health-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(130px, 1fr));
+    gap: 12px;
+}
+
+.account-health-card {
+    min-height: 88px;
+    padding: 14px 16px;
+    border: 1px solid var(--skin-border);
+    border-radius: 10px;
+    background: var(--skin-surface-soft);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.account-health-card span { color: var(--skin-text-muted); font-size: 13px; }
+.account-health-card strong { font-size: 27px; line-height: 1; }
+.account-health-card--ok strong { color: #16a34a; }
+.account-health-card--warn strong { color: #d97706; }
+.account-health-card--error strong { color: var(--skin-danger); }
+
+.account-health-worker {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    margin: 14px 0;
+    padding: 11px 14px;
+    background: var(--skin-surface-muted);
+    border: 1px solid var(--skin-border);
+    border-radius: 9px;
+}
+
+.account-health-worker > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px 12px; }
+.account-health-worker span:not(.account-health-worker-dot) { color: var(--skin-text-muted); font-size: 12px; }
+.account-health-worker-dot { width: 9px; height: 9px; border-radius: 50%; background: #94a3b8; flex: 0 0 auto; }
+.account-health-worker-dot.is-running { background: #22c55e; box-shadow: 0 0 0 4px rgba(34, 197, 94, .12); }
+.account-health-worker-dot.is-error { background: var(--skin-danger); }
+
+.account-health-toolbar {
+    display: flex;
+    align-items: end;
+    flex-wrap: wrap;
+    gap: 9px;
+    margin-bottom: 16px;
+}
+
+.account-health-toolbar label { display: grid; gap: 4px; color: var(--skin-text-muted); font-size: 12px; }
+.account-health-toolbar select,
+.account-health-toolbar input {
+    min-width: 140px;
+    height: 36px;
+    padding: 0 9px;
+    color: var(--skin-text);
+    background: var(--skin-surface);
+    border: 1px solid var(--skin-border-strong);
+    border-radius: 7px;
+}
+
+.account-health-breakdown { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+.account-health-breakdown section { padding: 14px; border: 1px solid var(--skin-border); border-radius: 9px; }
+.account-health-breakdown h4, .account-health-table-heading h4 { margin: 0 0 10px; font-size: 14px; }
+.account-health-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.account-health-chip { padding: 4px 8px; border-radius: 999px; background: var(--skin-surface-soft); border: 1px solid var(--skin-border); font-size: 12px; }
+.account-health-chip strong { margin-left: 5px; }
+.account-health-muted { color: var(--skin-text-muted); font-size: 12px; }
+
+.account-health-table-section { border: 1px solid var(--skin-border); border-radius: 10px; overflow: hidden; }
+.account-health-runs-section { margin-top: 14px; }
+.account-health-table-heading { padding: 13px 15px 3px; display: flex; justify-content: space-between; gap: 10px; }
+.account-health-table-heading span { color: var(--skin-text-muted); font-size: 12px; }
+.account-health-table-wrap { overflow: auto; }
+.account-health-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.account-health-table th, .account-health-table td { padding: 10px 12px; border-top: 1px solid var(--skin-border); text-align: left; white-space: nowrap; }
+.account-health-table th { position: sticky; top: 0; background: var(--skin-surface-muted); color: var(--skin-text-muted); font-weight: 600; }
+.account-health-table td:last-child { white-space: normal; min-width: 190px; max-width: 300px; word-break: break-word; }
+.account-health-email { font-weight: 600; }
+.account-health-id { display: block; color: var(--skin-text-muted); font-size: 10px; }
+.account-health-badge { display: inline-flex; padding: 3px 7px; border-radius: 999px; font-weight: 600; background: #e2e8f0; color: #475569; }
+.account-health-badge--healthy { color: #166534; background: #dcfce7; }
+.account-health-badge--success { color: #166534; background: #dcfce7; }
+.account-health-badge--unhealthy, .account-health-badge--failed, .account-health-badge--error { color: #991b1b; background: #fee2e2; }
+.account-health-badge--partial_failed { color: #991b1b; background: #fee2e2; }
+.account-health-badge--quarantined { color: #991b1b; background: #fee2e2; }
+.account-health-badge--pending, .account-health-badge--due, .account-health-badge--suspect, .account-health-badge--transient { color: #92400e; background: #fef3c7; }
+.account-health-empty { padding: 30px !important; text-align: center !important; color: var(--skin-text-muted); }
+
+@media (max-width: 768px) {
+    .account-health-modal-content { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; }
+    .account-health-body { padding: 14px; }
+    .account-health-summary { grid-template-columns: 1fr 1fr; }
+    .account-health-breakdown { grid-template-columns: 1fr; }
+    .account-health-toolbar label { flex: 1 1 130px; }
+    .account-health-toolbar select { width: 100%; min-width: 0; }
+}

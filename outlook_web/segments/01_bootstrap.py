@@ -686,6 +686,7 @@ INDEX_CSS_FILES = (
     'css/index/06-modals-toast.css',
     'css/index/07-meta.css',
     'css/index/08-responsive.css',
+    'css/index/09-account-health.css',
 )
 INDEX_JS_FILES = (
     'js/index/01-core.js',
@@ -700,6 +701,7 @@ INDEX_JS_FILES = (
     'js/index/10-batch-actions.js',
     'js/index/11-email-shares.js',
     'js/index/12-outlook-upload-accounts.js',
+    'js/index/13-account-health-dashboard.js',
 )
 
 # GPTMail API 配置
@@ -1444,6 +1446,25 @@ def init_db():
             error_message TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS account_health_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trigger_type TEXT NOT NULL DEFAULT 'scheduled',
+            status TEXT NOT NULL DEFAULT 'running',
+            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            finished_at TIMESTAMP,
+            selected_count INTEGER NOT NULL DEFAULT 0,
+            processed_count INTEGER NOT NULL DEFAULT 0,
+            healthy_count INTEGER NOT NULL DEFAULT 0,
+            suspect_count INTEGER NOT NULL DEFAULT 0,
+            transient_count INTEGER NOT NULL DEFAULT 0,
+            quarantined_count INTEGER NOT NULL DEFAULT 0,
+            deleted_count INTEGER NOT NULL DEFAULT 0,
+            exception_count INTEGER NOT NULL DEFAULT 0,
+            error_code TEXT
         )
     ''')
 
@@ -2286,6 +2307,11 @@ def init_db():
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_account_refresh_logs_account_id
         ON account_refresh_logs(account_id)
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_account_health_runs_started_at
+        ON account_health_runs(started_at DESC)
     ''')
 
     cursor.execute('''
