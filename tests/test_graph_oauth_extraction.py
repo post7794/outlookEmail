@@ -341,6 +341,43 @@ class GraphOauthRouteTests(unittest.TestCase):
         self.assertEqual(upload['is_authorized'], 1)
         self.assertEqual(upload['source'], 'auto_auth')
 
+    def test_external_import_authorize_honors_graph_mode_and_probes_inbox(self):
+        with patch.object(web_outlook_app, 'extract_graph_refresh_token', return_value={
+            'success': True,
+            'refresh_token': 'graph-refresh-secret',
+            'client_id': web_outlook_app.OAUTH_CLIENT_ID,
+        }) as extract_mock, patch.object(
+            web_outlook_app, 'test_refresh_token', return_value=(True, None, '')
+        ), patch.object(web_outlook_app, 'probe_graph_mailbox_access', return_value={
+            'success': True,
+            'rotated_refresh_token': 'rotated-graph-secret',
+        }) as graph_probe, patch.object(
+            web_outlook_app, 'probe_imap_mailbox_access'
+        ) as imap_probe:
+            response = self.client.post(
+                '/api/external/outlook/import-authorize',
+                headers=self._external_headers(),
+                json={
+                    'email': 'graph-external@example.com',
+                    'password': 'mail-secret',
+                    'mode': 'graph',
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()['success'])
+        self.assertEqual(
+            extract_mock.call_args.kwargs['scope'],
+            web_outlook_app.GRAPH_EXTRACT_GRAPH_SCOPE,
+        )
+        graph_probe.assert_called_once_with(
+            web_outlook_app.OAUTH_CLIENT_ID,
+            'graph-refresh-secret',
+        )
+        imap_probe.assert_not_called()
+        self.assertNotIn('graph-refresh-secret', response.get_data(as_text=True))
+        self.assertNotIn('rotated-graph-secret', response.get_data(as_text=True))
+
     def test_external_import_authorize_failure_keeps_upload_without_leaking_details(self):
         with patch.object(web_outlook_app, 'extract_graph_refresh_token', return_value={
             'success': False,

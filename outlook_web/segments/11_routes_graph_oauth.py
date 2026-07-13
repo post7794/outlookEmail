@@ -728,6 +728,7 @@ def api_external_outlook_import_authorize():
     email = str(data.get('email') or '').strip()
     password = str(data.get('password') or '')
     remark = str(data.get('remark') or '').strip()
+    mode = normalize_graph_oauth_mode(data.get('mode'))
     if not email or not password:
         return jsonify({
             'success': False,
@@ -744,7 +745,7 @@ def api_external_outlook_import_authorize():
         }), 400
     get_db().commit()
 
-    result = run_graph_oauth_task_sync(int(upload_result['id']), mode='imap')
+    result = run_graph_oauth_task_sync(int(upload_result['id']), mode=mode)
     if not result.get('success'):
         # 不透传 OAuth details、密码或 token；上传记录保留，便于后台排查或重试。
         return jsonify({
